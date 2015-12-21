@@ -8,6 +8,7 @@ import (
 	"math/rand"
 
 	"github.com/llgcode/draw2d/draw2dimg"
+	"github.com/persomi/set"
 	"github.com/pzsz/voronoi"
 	"github.com/pzsz/voronoi/utils"
 )
@@ -18,6 +19,16 @@ type Zone struct {
 
 type ZoneConfig struct {
 	Sizes []float64
+}
+
+func (zc *ZoneConfig) NormalizeSizes() {
+	total := 0.
+	for _, s := range zc.Sizes {
+		total += s
+	}
+	for ix, s := range zc.Sizes {
+		zc.Sizes[ix] = s / total
+	}
 }
 
 func (zc ZoneConfig) String() string {
@@ -46,16 +57,6 @@ var Palette = []color.Color{
 	color.RGBA{0xb2, 0xdc, 0xef, 0xff},
 }
 
-func (zc *ZoneConfig) NormalizeSizes() {
-	total := 0.
-	for _, s := range zc.Sizes {
-		total += s
-	}
-	for ix, s := range zc.Sizes {
-		zc.Sizes[ix] = s / total
-	}
-}
-
 func ZoneSizes(zc *ZoneConfig, zones map[*voronoi.Cell]int, d *voronoi.Diagram) (float64, []float64) {
 	unassignedSize := 0.
 	sizes := make([]float64, len(zc.Sizes))
@@ -69,115 +70,146 @@ func ZoneSizes(zc *ZoneConfig, zones map[*voronoi.Cell]int, d *voronoi.Diagram) 
 	return unassignedSize, sizes
 }
 
-func AssignZones(d *voronoi.Diagram, zc *ZoneConfig) map[*voronoi.Cell]int {
-	numZones := len(zc.Sizes)
-	zones := map[*voronoi.Cell]int{}
-	zoneAreas := make([]float64, numZones)
-	// log.Printf("len(zoneAreas): %d", len(zoneAreas))
-	eligibleCells := append([]*voronoi.Cell{}, d.Cells[rand.Intn(len(d.Cells))])
-	var safeEligibleCells []*voronoi.Cell
-	var safeZones map[*voronoi.Cell]int
-	var safeZoneAreas []float64
-	currentZone := 0
-	i := 0
-	maxCurrentSize := 0.
-	var lastGoodZones map[*voronoi.Cell]int
-	for {
-		// RenderPreview(zones, d, fmt.Sprintf("assign/%d.png", i))
-		i++
-		if len(eligibleCells) == 0 {
-			if len(safeEligibleCells) == 1 {
-				return lastGoodZones
-			}
-			if zoneAreas[currentZone] > maxCurrentSize {
-				maxCurrentSize = zoneAreas[currentZone]
-				lastGoodZones = map[*voronoi.Cell]int{}
-				for c, z := range zones {
-					lastGoodZones[c] = z
-				}
-			}
-			if len(safeEligibleCells) < 1 {
-				break
-			}
-			safeEligibleCells = append([]*voronoi.Cell{}, safeEligibleCells[1:]...)
-			eligibleCells = append([]*voronoi.Cell{}, safeEligibleCells[:1]...)
-			zones = map[*voronoi.Cell]int{}
-			for c, z := range safeZones {
-				zones[c] = z
-			}
-			zoneAreas = append([]float64{}, safeZoneAreas...)
-		}
-		// log.Printf("current zone: %d", currentZone)
-		ix := rand.Intn(len(eligibleCells))
-		c := eligibleCells[ix]
-		zones[c] = currentZone
-		zoneAreas[currentZone] -= utils.CellArea(c)
-		eligibleCells = append(eligibleCells[:ix], eligibleCells[ix+1:]...)
-	loop:
-		for _, he := range c.Halfedges {
-			if utils.Distance(he.GetStartpoint(), he.GetEndpoint()) < 0.03 {
-				continue loop
-			}
-			oc := he.Edge.GetOtherCell(c)
-			if oc != nil {
-				if _, ok := zones[oc]; !ok {
-					for _, ec := range eligibleCells {
-						if ec == oc {
-							continue loop
-						}
-					}
-					eligibleCells = append(eligibleCells, oc)
-				}
-			}
-		}
-		if zoneAreas[currentZone] > zc.Sizes[currentZone] {
-			currentZone++
-			maxCurrentSize = 0
-			if len(eligibleCells) > 1 {
-				safeEligibleCells = append([]*voronoi.Cell{}, eligibleCells...)
-				// append other neighbor cells of other zones
-				otherEligibleCells := []*voronoi.Cell{}
-				for c, z := range zones {
-					if z < currentZone {
-					loopy:
-						for _, he := range c.Halfedges {
-							oc := he.Edge.GetOtherCell(c)
-							if oc != nil {
-								if _, ok := zones[oc]; !ok {
-									for _, ec := range safeEligibleCells {
-										if ec == oc {
-											continue loopy
-										}
-									}
-									for _, ec := range otherEligibleCells {
-										if ec == oc {
-											continue loopy
-										}
-									}
-									otherEligibleCells = append(otherEligibleCells, oc)
-								}
-							}
-						}
-					}
-				}
-				//
-				safeEligibleCells = append(safeEligibleCells, otherEligibleCells...)
-				safeZones = map[*voronoi.Cell]int{}
-				for c, z := range zones {
-					safeZones[c] = z
-				}
-				safeZoneAreas = append([]float64{}, zoneAreas...)
-			}
-			eligibleCells = eligibleCells[:1]
-		}
-		if currentZone == numZones {
-			break
-		}
-	}
-	return zones
+type Map struct {
+	d         *voronoi.Diagram
+	cellZone  map[*voronoi.Cell]int
+	zoneCell  map[int]cellSet
+	zc        *ZoneConfig
+	zoneCount int
 }
 
-func RenderPreview(zones map[*voronoi.Cell]int, diagram *voronoi.Diagram, fileName string) {
+func New() *Map {
+	return &Map{
+		cellZone: map[*voronoi.Cell]int{},
+		zoneCell: map[int]cellSet{},
+	}
+}
+
+type cellSet set.Interface
+
+func (m *Map) assign(zoneId int, cells ...*voronoi.Cell) {
+	for _, c := range cells {
+		if _, ok := m.cellZone[c]; !ok {
+			m.cellZone[c] = zoneId
+			if m.zoneCell[zoneId] == nil {
+				m.zoneCell[zoneId] = set.New(set.NonThreadSafe)
+			}
+			m.zoneCell[zoneId].Add(c)
+		} else {
+			log.Fatalf("Cell already assigned: site: %v, zone: %d", c.Site, zoneId)
+		}
+	}
+}
+
+func (m *Map) zoneCells(zoneId int) cellSet {
+	if c, ok := m.zoneCell[zoneId]; !ok {
+		return set.New(set.NonThreadSafe)
+	} else {
+		return c
+	}
+}
+
+func (m *Map) zoneNeighbors(zoneIds ...int) cellSet {
+	out := set.New(set.NonThreadSafe)
+	for _, zoneId := range zoneIds {
+
+		zoneCells := m.zoneCells(zoneId).List()
+		for _, c := range zoneCells {
+			out.Merge(m.neighbors(c.(*voronoi.Cell)))
+		}
+	}
+	return out
+}
+
+func (m *Map) neighbors(cells ...*voronoi.Cell) cellSet {
+	out := set.New(set.NonThreadSafe)
+	for _, c := range cells {
+		ocSet := set.New(set.NonThreadSafe)
+		for _, he := range c.Halfedges {
+			oc := he.Edge.GetOtherCell((*voronoi.Cell)(c))
+			if oc != nil {
+				if _, ok := m.cellZone[(*voronoi.Cell)(oc)]; !ok {
+					ocSet.AddOne(oc)
+				}
+			}
+		}
+		out.Merge(ocSet)
+	}
+	return out
+}
+
+func (m *Map) otherZones(zoneId int) []int {
+	var out []int
+	for i := 0; i <= m.zoneCount; i++ {
+		if i != zoneId {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+func randomChoice(cs cellSet) *voronoi.Cell {
+	list := cs.List()
+	ix := rand.Intn(len(list))
+	return list[ix].(*voronoi.Cell)
+}
+
+func (m *Map) growZone(zoneId int, startCell *voronoi.Cell) (cellSet, error) {
+	var copiedMap Map = *m
+	area := 0.
+	prescribedArea := m.zc.Sizes[zoneId]
+	grow := set.New(set.NonThreadSafe)
+	grow.AddOne(startCell)
+	for {
+		if area >= prescribedArea {
+			m.zoneCell = copiedMap.zoneCell
+			m.cellZone = copiedMap.cellZone
+			return grow, nil
+		}
+		if grow.IsEmpty() {
+			return copiedMap.zoneCells(zoneId), fmt.Errorf("No space for zone %d", zoneId)
+		}
+		next := randomChoice(grow)
+		grow.Remove(next)
+		// log.Println(grow)
+		copiedMap.assign(zoneId, next)
+		area -= utils.CellArea((*voronoi.Cell)(next))
+		grow.Merge(copiedMap.neighbors(next))
+	}
+}
+
+func addCells(cells []*voronoi.Cell, cs cellSet) {
+	for _, c := range cells {
+		cs.AddOne(c)
+	}
+}
+
+func (m *Map) AssignZones(d *voronoi.Diagram, zc *ZoneConfig) {
+	m.d = d
+	m.zc = zc
+	m.zoneCount = len(zc.Sizes)
+	grow := set.New(set.NonThreadSafe)
+	addCells(m.d.Cells, grow)
+	for zoneId := 0; zoneId < m.zoneCount; zoneId++ {
+		start := randomChoice(grow)
+		cs, err := m.growZone(zoneId, start)
+		if err != nil {
+			growOther := m.zoneNeighbors(m.otherZones(zoneId)...)
+			growOther.Separate(cs)
+			start := randomChoice(grow)
+			cs, err := m.growZone(zoneId, start)
+			if err != nil {
+				log.Printf("exiting assignment: %v", err)
+				return
+			}
+			grow = cs
+			continue
+		}
+		grow = cs
+	}
+}
+
+func (m *Map) SaveImage(fileName string) {
 	// Initialize the graphic context on an RGBA image
 	dest := image.NewRGBA(image.Rect(0, 0, 500, 500))
 	gc := draw2dimg.NewGraphicContext(dest)
@@ -189,11 +221,8 @@ func RenderPreview(zones map[*voronoi.Cell]int, diagram *voronoi.Diagram, fileNa
 	xTrans := 0.
 	yTrans := 0.
 
-	for _, c := range diagram.Cells {
-		if _, ok := zones[c]; !ok {
-			continue
-		}
-		gc.SetFillColor(Palette[zones[c]+5])
+	for c, z := range m.cellZone {
+		gc.SetFillColor(Palette[z+5])
 		gc.MoveTo(c.Halfedges[0].GetStartpoint().X*scale+xTrans, c.Halfedges[0].GetStartpoint().Y*scale+yTrans)
 		for _, he := range c.Halfedges {
 			// gc.MoveTo(he.GetStartpoint().X*scale, he.GetStartpoint().Y*scale)
@@ -218,7 +247,7 @@ func RenderPreview(zones map[*voronoi.Cell]int, diagram *voronoi.Diagram, fileNa
 	// }
 
 	gc.SetFillColor(image.Black)
-	for _, e := range diagram.Edges {
+	for _, e := range m.d.Edges {
 		gc.MoveTo(e.Va.X*scale+xTrans, e.Va.Y*scale+yTrans)
 		gc.LineTo(e.Vb.X*scale+xTrans, e.Vb.Y*scale+yTrans)
 		gc.Close()
