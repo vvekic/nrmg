@@ -9,7 +9,6 @@ import (
 
 	"github.com/llgcode/draw2d/draw2dimg"
 	"github.com/llgcode/draw2d/draw2dkit"
-	"github.com/persomi/set"
 	"github.com/pzsz/voronoi"
 	"github.com/pzsz/voronoi/utils"
 )
@@ -40,7 +39,7 @@ func (c Config) String() string {
 type Map struct {
 	d         *voronoi.Diagram
 	cellZone  map[*voronoi.Cell]int
-	zoneCell  map[int]cellSet
+	zoneCell  map[int]*voronoi.CellSet
 	c         *Config
 	zoneCount int
 }
@@ -48,27 +47,21 @@ type Map struct {
 func New() *Map {
 	return &Map{
 		cellZone: map[*voronoi.Cell]int{},
-		zoneCell: map[int]cellSet{},
+		zoneCell: map[int]*voronoi.CellSet{},
 	}
-}
-
-type cellSet set.Interface
-
-func newCellSet() cellSet {
-	return set.New(set.NonThreadSafe)
 }
 
 func (m *Map) tesselate(c *Config) {
 	m.d = createDiagram(c.Cells)
 	m.c = c
 	m.zoneCount = len(c.ZoneSizes)
-	grow := set.New(set.NonThreadSafe)
+	grow := voronoi.NewCellSet()
 	addCells(m.d.Cells, grow)
 	for zoneId := 0; zoneId < m.zoneCount; zoneId++ {
 		grown, err := m.tryGrowingZone(zoneId, grow)
 		if err != nil {
 			grow = m.zoneNeighbors(m.otherZones(zoneId)...)
-			grow.(set.Interface).Separate(grown)
+			grow = grow.Difference(grown)
 			grown, err = m.tryGrowingZone(zoneId, grow)
 			if err != nil {
 				log.Printf("Zone %d error: %v", zoneId, err)
@@ -90,13 +83,16 @@ func createDiagram(n int) *voronoi.Diagram {
 	return d
 }
 
-func (m *Map) tryGrowingZone(zoneId int, grow cellSet) (cellSet, error) {
+func (m *Map) tryGrowingZone(zoneId int, grow *voronoi.CellSet) (*voronoi.CellSet, error) {
 	for {
+		if grow.IsEmpty() {
+			return voronoi.NewCellSet(), fmt.Errorf("error zone %d: grow set empty", zoneId)
+		}
 		origin := randomChoice(grow)
 		grown, err := m.growZone(zoneId, origin)
 		if err != nil {
-			grow.(set.Interface).Separate(grown)
-			if grow.(set.Interface).IsEmpty() {
+			grow = grow.Difference(grown)
+			if grow.IsEmpty() {
 				return grown, err
 			}
 			continue
@@ -105,17 +101,19 @@ func (m *Map) tryGrowingZone(zoneId int, grow cellSet) (cellSet, error) {
 	}
 }
 
-func (m *Map) growZone(zoneId int, startCell *voronoi.Cell) (cellSet, error) {
+func (m *Map) growZone(zoneId int, startCell *voronoi.Cell) (*voronoi.CellSet, error) {
 	var copiedMap Map = *m
 	area := 0.
 	prescribedArea := m.c.ZoneSizes[zoneId]
-	grow := set.New(set.NonThreadSafe)
-	grow.AddOne(startCell)
-	grown := set.New(set.NonThreadSafe)
+	grow := voronoi.NewCellSet()
+	grow.Add(startCell)
+	grown := voronoi.NewCellSet()
 	for {
+		// log.Printf("area: %f", area)
 		if area > prescribedArea {
 			return grown, nil
 		}
+		// log.Printf("grow: %d", grow.Cardinality())
 		if grow.IsEmpty() {
 			return grown, fmt.Errorf("No space for zone %d", zoneId)
 		}
@@ -123,65 +121,67 @@ func (m *Map) growZone(zoneId int, startCell *voronoi.Cell) (cellSet, error) {
 		grow.Remove(next)
 		// log.Println(grow)
 		copiedMap.assign(zoneId, next)
-		grown.AddOne(next)
-		area -= utils.CellArea((*voronoi.Cell)(next))
-		grow.Merge(copiedMap.neighbors(next))
+		grown.Add(next)
+		// log.Printf("d_area: %f", utils.CellArea(next))
+		area -= utils.CellArea(next)
+		grow = grow.Union(copiedMap.neighbors(voronoi.NewCellSet(next)))
 	}
 }
 
-func (m *Map) assignSet(zoneId int, csd cellSet) {
-	for _, c := range csd.(set.Interface).List() {
-		m.assign(zoneId, c.(*voronoi.Cell))
+func (m *Map) assignSet(zoneId int, cs *voronoi.CellSet) error {
+	for c := range cs.Iter() {
+		if err := m.assign(zoneId, c); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (m *Map) assign(zoneId int, cells ...*voronoi.Cell) {
+func (m *Map) assign(zoneId int, cells ...*voronoi.Cell) error {
 	for _, c := range cells {
 		if _, ok := m.cellZone[c]; !ok {
 			m.cellZone[c] = zoneId
 			if m.zoneCell[zoneId] == nil {
-				m.zoneCell[zoneId] = set.New(set.NonThreadSafe)
+				m.zoneCell[zoneId] = voronoi.NewCellSet()
 			}
 			m.zoneCell[zoneId].Add(c)
 		} else {
-			log.Fatalf("Cell already assigned: site: %v, zone: %d", c.Site, zoneId)
+			return fmt.Errorf("Cell already assigned: site: %v, zone: %d", c.Site, zoneId)
 		}
 	}
+	return nil
 }
 
-func (m *Map) zoneCells(zoneId int) cellSet {
+func (m *Map) zoneCells(zoneId int) *voronoi.CellSet {
 	if c, ok := m.zoneCell[zoneId]; !ok {
-		return set.New(set.NonThreadSafe)
+		return voronoi.NewCellSet()
 	} else {
 		return c
 	}
 }
 
-func (m *Map) zoneNeighbors(zoneIds ...int) cellSet {
-	out := set.New(set.NonThreadSafe)
+func (m *Map) zoneNeighbors(zoneIds ...int) *voronoi.CellSet {
+	out := voronoi.NewCellSet()
 	for _, zoneId := range zoneIds {
-
-		zoneCells := m.zoneCells(zoneId).List()
-		for _, c := range zoneCells {
-			out.Merge(m.neighbors(c.(*voronoi.Cell)))
-		}
+		cs := m.zoneCells(zoneId)
+		out = out.Union(m.neighbors(cs))
 	}
 	return out
 }
 
-func (m *Map) neighbors(cells ...*voronoi.Cell) cellSet {
-	out := newCellSet()
-	for _, c := range cells {
-		ocSet := set.New(set.NonThreadSafe)
+func (m *Map) neighbors(cs *voronoi.CellSet) *voronoi.CellSet {
+	out := voronoi.NewCellSet()
+	for c := range cs.Iter() {
+		ocSet := voronoi.NewCellSet()
 		for _, he := range c.Halfedges {
-			oc := he.Edge.GetOtherCell((*voronoi.Cell)(c))
-			if oc != nil {
-				if _, ok := m.cellZone[(*voronoi.Cell)(oc)]; !ok {
-					ocSet.AddOne(oc)
+			oc := he.Edge.GetOtherCell(c)
+			if oc != nil && !cs.Contains(oc) {
+				if _, ok := m.cellZone[oc]; !ok {
+					ocSet.Add(oc)
 				}
 			}
 		}
-		out.Merge(ocSet)
+		out = out.Union(ocSet)
 	}
 	return out
 }
@@ -196,14 +196,14 @@ func (m *Map) otherZones(zoneId int) []int {
 	return out
 }
 
-func randomChoice(cs cellSet) *voronoi.Cell {
-	list := cs.List()
-	return list[rand.Intn(len(list))].(*voronoi.Cell)
+func randomChoice(cs *voronoi.CellSet) *voronoi.Cell {
+	list := cs.ToSlice()
+	return list[rand.Intn(len(list))]
 }
 
-func addCells(cells []*voronoi.Cell, cs cellSet) {
+func addCells(cells []*voronoi.Cell, cs *voronoi.CellSet) {
 	for _, c := range cells {
-		cs.AddOne(c)
+		cs.Add(c)
 	}
 }
 
