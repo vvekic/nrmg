@@ -56,7 +56,7 @@ func TestNeighbors(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		rc := randomChoice(cs)
 		rc2 := randomChoice(cs.Difference(voronoi.NewCellSet(rc)))
-		n := m.neighbors(voronoi.NewCellSet(rc, rc2))
+		n := m.neighbors(voronoi.NewCellSet(rc, rc2), false)
 		assert.False(t, n.Contains(rc))
 		assert.False(t, n.Contains(rc2))
 		for c := range n.Iter() {
@@ -125,6 +125,7 @@ func TestGrowZone(t *testing.T) {
 	assert.NoError(t, err)
 	// log.Printf("cellsetarea: %f", utils.CellSetArea(grown))
 	assert.True(t, utils.CellSetArea(grown) >= 0.5)
+	m.assignSet(0, grown)
 	startCell = randomChoice(grown)
 	grown, err = m.growZone(1, startCell)
 	assert.Error(t, err)
@@ -138,7 +139,14 @@ func TestTesselate(t *testing.T) {
 	}
 	c.NormalizeSizes()
 	log.Println(c)
-	m := New()
-	m.tesselate(c)
-	m.saveImage("map.png")
+	for {
+		m := New()
+		m.tesselate(c)
+		e := m.zoneError()
+		if e < 0.005 {
+			log.Printf("sq err: %f", e)
+			m.saveImage("map.png")
+			break
+		}
+	}
 }
