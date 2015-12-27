@@ -132,12 +132,12 @@ func TestGrowZone(t *testing.T) {
 }
 
 func TestTesselate(t *testing.T) {
-	// t.SkipNow()
+	t.SkipNow()
 	c := &Config{
 		ZoneSizes: []float64{25, 12, 13, 13, 12, 25},
 		Cells:     200,
 	}
-	c.NormalizeSizes()
+	c.normalizeSizes()
 	log.Println(c)
 	for {
 		m := New()
