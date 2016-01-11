@@ -1,0 +1,11 @@
+E:\Documents and Settings\windbell\My Documents\Visual Studio 2008\Projects\Heroes5RandomMap\Heroes5TerrainEditor\obj\Debug\ResolveAssemblyReference.cache
+E:\Documents and Settings\windbell\My Documents\Visual Studio 2008\Projects\Heroes5RandomMap\Heroes5TerrainEditor\obj\Debug\Heroes5TerrainEditor.Properties.Resources.resources
+E:\Documents and Settings\windbell\My Documents\Visual Studio 2008\Projects\Heroes5RandomMap\Heroes5TerrainEditor\obj\Debug\Heroes5TerrainEditor.csproj.GenerateResource.Cache
+E:\Documents and Settings\windbell\My Documents\Visual Studio 2008\Projects\Heroes5RandomMap\Heroes5TerrainEditor\bin\Debug\Heroes5TerrainEditor.exe
+E:\Documents and Settings\windbell\My Documents\Visual Studio 2008\Projects\Heroes5RandomMap\Heroes5TerrainEditor\bin\Debug\Heroes5TerrainEditor.pdb
+E:\Documents and Settings\windbell\My Documents\Visual Studio 2008\Projects\Heroes5RandomMap\Heroes5TerrainEditor\obj\Debug\Heroes5TerrainEditor.Form1.resources
+E:\Documents and Settings\windbell\My Documents\Visual Studio 2008\Projects\Heroes5RandomMap\Heroes5TerrainEditor\obj\Debug\Heroes5TerrainEditor.exe
+E:\Documents and Settings\windbell\My Documents\Visual Studio 2008\Projects\Heroes5RandomMap\Heroes5TerrainEditor\obj\Debug\Heroes5TerrainEditor.pdb
+E:\Documents and Settings\windbell\My Documents\Visual Studio 2008\Projects\Heroes5RandomMap\Heroes5TerrainEditor\bin\Debug\en\Heroes5TerrainEditor.resources.dll
+E:\Documents and Settings\windbell\My Documents\Visual Studio 2008\Projects\Heroes5RandomMap\Heroes5TerrainEditor\obj\Debug\Heroes5TerrainEditor.Form1.en.resources
+E:\Documents and Settings\windbell\My Documents\Visual Studio 2008\Projects\Heroes5RandomMap\Heroes5TerrainEditor\obj\Debug\en\Heroes5TerrainEditor.resources.dll
